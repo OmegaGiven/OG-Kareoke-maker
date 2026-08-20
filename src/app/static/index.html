@@ -1,0 +1,262 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>OG Karaoke Maker</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #14151a; color: #e8e8ec; margin: 0; padding: 2rem; }
+  h1 { font-size: 1.4rem; margin-bottom: .2rem; }
+  .sub { color: #9a9aa5; margin-bottom: 1.5rem; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; max-width: 1200px; }
+  fieldset { border: 1px solid #33343c; border-radius: 8px; margin-bottom: 1rem; padding: 1rem; }
+  legend { color: #cfcfe0; padding: 0 .4rem; }
+  label { display: block; font-size: .85rem; color: #b6b6c4; margin-top: .6rem; }
+  input[type=text], input[type=number], select { width: 100%; box-sizing: border-box; background: #1e1f26; border: 1px solid #33343c; color: #e8e8ec; border-radius: 5px; padding: .4rem; margin-top: .2rem; }
+  input[type=range] { width: 100%; }
+  input[type=file] { margin-top: .3rem; }
+  .row { display: flex; gap: 1rem; }
+  .row > div { flex: 1; }
+  .checkline { display: flex; align-items: center; gap: .5rem; margin-top: .6rem; }
+  .checkline label { margin: 0; }
+  button { background: #4a5cff; color: white; border: none; border-radius: 6px; padding: .6rem 1.2rem; font-size: .95rem; cursor: pointer; margin-top: 1rem; }
+  button.secondary { background: #33343c; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  #progressWrap { margin-top: 1rem; display: none; }
+  #progressBar { height: 18px; background: #1e1f26; border-radius: 9px; overflow: hidden; border: 1px solid #33343c; }
+  #progressFill { height: 100%; width: 0%; background: linear-gradient(90deg,#4a5cff,#8f6cff); transition: width .3s; }
+  #stageLabel { font-size: .85rem; color: #9a9aa5; margin-top: .3rem; }
+  video { width: 100%; border-radius: 8px; margin-top: .6rem; background: #000; }
+  #downloadLink { display: none; }
+  .value { float: right; color: #7d8bff; }
+</style>
+</head>
+<body>
+  <h1>OG Karaoke Maker</h1>
+  <div class="sub">Font, particles, camera, position — tune it, preview it, render it.</div>
+
+  <div class="grid">
+    <div>
+      <fieldset>
+        <legend>Source</legend>
+        <label>Song (audio or video with audio track)</label>
+        <input type="file" id="song" accept="audio/*,video/*">
+        <label>Cover art</label>
+        <input type="file" id="cover" accept="image/*">
+        <label>Lyrics (.txt, one line per cue) — omit to auto-detect from vocals</label>
+        <input type="file" id="lyrics" accept=".txt">
+        <label>Output name</label>
+        <input type="text" id="outName" value="My Song">
+      </fieldset>
+
+      <fieldset>
+        <legend>Text</legend>
+        <div class="row">
+          <div>
+            <label>Font</label>
+            <select id="font"></select>
+          </div>
+          <div>
+            <label>Position</label>
+            <select id="align">
+              <option value="top">Top</option>
+              <option value="middle">Middle</option>
+              <option value="bottom" selected>Bottom</option>
+            </select>
+          </div>
+        </div>
+        <label>Font size <span class="value" id="fontsizeVal">88</span></label>
+        <input type="range" id="fontsize" min="30" max="160" value="88">
+        <label>Margin from edge (px) <span class="value" id="marginVal">130</span></label>
+        <input type="range" id="marginV" min="0" max="400" value="130">
+        <div class="row">
+          <div>
+            <label>Highlight color</label>
+            <input type="text" id="highlightColor" value="gold">
+          </div>
+          <div>
+            <label>Base color</label>
+            <input type="text" id="baseColor" value="white">
+          </div>
+        </div>
+        <div class="checkline"><input type="checkbox" id="caps" checked><label for="caps">ALL CAPS</label></div>
+        <div class="checkline">
+          <input type="checkbox" id="lineKaraoke">
+          <label for="lineKaraoke">Full-line mode (whole line stays up, words tint as sung — off = one word at a time)</label>
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Camera</legend>
+        <label>Zoom drift speed <span class="value" id="zoomSpeedVal">0.0006</span></label>
+        <input type="range" id="zoomSpeed" min="0" max="0.003" step="0.0001" value="0.0006">
+        <div class="row">
+          <div>
+            <label>Sway X (px)</label>
+            <input type="number" id="swayX" value="40">
+          </div>
+          <div>
+            <label>Sway Y (px)</label>
+            <input type="number" id="swayY" value="25">
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>Sway speed X (lower = shakier)</label>
+            <input type="number" id="swayFreqX" value="40">
+          </div>
+          <div>
+            <label>Sway speed Y (lower = shakier)</label>
+            <input type="number" id="swayFreqY" value="55">
+          </div>
+        </div>
+        <div class="checkline"><input type="checkbox" id="noBoom"><label for="noBoom">Disable beat-synced camera boom (zoom pulse)</label></div>
+        <label>Boom amplitude <span class="value" id="boomAmpVal">0.10</span></label>
+        <input type="range" id="boomAmplitude" min="0" max="0.4" step="0.01" value="0.10">
+      </fieldset>
+    </div>
+
+    <div>
+      <fieldset>
+        <legend>Particle effects</legend>
+        <label>Ambient particle count <span class="value" id="ambientVal">70</span></label>
+        <input type="range" id="ambientCount" min="0" max="200" value="70">
+        <label>Burst size (max) <span class="value" id="burstSizeVal">5.5</span></label>
+        <input type="range" id="burstSizeMax" min="1" max="20" step="0.5" value="5.5">
+        <label>Burst count (max, at strongest hits) <span class="value" id="burstCountVal">28</span></label>
+        <input type="range" id="burstCountMax" min="4" max="150" value="28">
+        <label>Burst speed <span class="value" id="burstSpeedVal">270</span></label>
+        <input type="range" id="burstSpeed" min="50" max="700" value="270">
+        <label>Burst scatter area</label>
+        <select id="burstArea">
+          <option value="center">Center-weighted (classic)</option>
+          <option value="full">Full screen</option>
+        </select>
+        <div class="checkline"><input type="checkbox" id="smokeOnly"><label for="smokeOnly">Smoke only (no sparks)</label></div>
+        <div class="checkline"><input type="checkbox" id="noSmoke"><label for="noSmoke">No smoke layer</label></div>
+        <div class="checkline"><input type="checkbox" id="noBeatPulse"><label for="noBeatPulse">No ambient beat pulse</label></div>
+        <button class="secondary" id="previewBtn">Preview particle effect</button>
+        <video id="previewVideo" controls loop style="display:none"></video>
+      </fieldset>
+
+      <fieldset>
+        <legend>Render</legend>
+        <button id="renderBtn">Render full video</button>
+        <div id="progressWrap">
+          <div id="progressBar"><div id="progressFill"></div></div>
+          <div id="stageLabel">queued</div>
+        </div>
+        <a id="downloadLink" href="#"><button>Download finished video</button></a>
+      </fieldset>
+    </div>
+  </div>
+
+<script>
+const $ = id => document.getElementById(id);
+
+// live value labels for sliders
+[["fontsize","fontsizeVal"],["marginV","marginVal"],["zoomSpeed","zoomSpeedVal"],
+ ["boomAmplitude","boomAmpVal"],["ambientCount","ambientVal"],["burstSizeMax","burstSizeVal"],
+ ["burstCountMax","burstCountVal"],["burstSpeed","burstSpeedVal"]].forEach(([inId,outId]) => {
+  const el = $(inId), out = $(outId);
+  el.addEventListener("input", () => out.textContent = el.value);
+});
+
+fetch("/api/fonts").then(r => r.json()).then(d => {
+  const sel = $("font");
+  d.fonts.forEach(f => {
+    const o = document.createElement("option");
+    o.value = f; o.textContent = f;
+    if (f === "Black Ops One") o.selected = true;
+    sel.appendChild(o);
+  });
+});
+
+function burstAreaBounds() {
+  if ($("burstArea").value === "full") return [0, 1, 0, 1];
+  return [0.2, 0.8, 0.3, 0.75];
+}
+
+function commonParticleCameraFields(fd) {
+  const [x0, x1, y0, y1] = burstAreaBounds();
+  fd.set("ambient_count", $("ambientCount").value);
+  fd.set("burst_count_max", $("burstCountMax").value);
+  fd.set("burst_size_max", $("burstSizeMax").value);
+  fd.set("burst_speed", $("burstSpeed").value);
+  fd.set("burst_area_x0", x0); fd.set("burst_area_x1", x1);
+  fd.set("burst_area_y0", y0); fd.set("burst_area_y1", y1);
+  fd.set("smoke_only", $("smokeOnly").checked);
+  fd.set("no_smoke", $("noSmoke").checked);
+  fd.set("no_beat_pulse", $("noBeatPulse").checked);
+  fd.set("zoom_speed", $("zoomSpeed").value);
+  fd.set("sway_x", $("swayX").value);
+  fd.set("sway_y", $("swayY").value);
+  fd.set("sway_freq_x", $("swayFreqX").value);
+  fd.set("sway_freq_y", $("swayFreqY").value);
+  fd.set("boom_amplitude", $("boomAmplitude").value);
+  fd.set("no_boom", $("noBoom").checked);
+}
+
+$("previewBtn").addEventListener("click", async () => {
+  if (!$("cover").files[0]) { alert("pick a cover image first"); return; }
+  $("previewBtn").disabled = true;
+  $("previewBtn").textContent = "Rendering preview...";
+  const fd = new FormData();
+  fd.set("cover", $("cover").files[0]);
+  commonParticleCameraFields(fd);
+  try {
+    const r = await fetch("/api/preview/particles", { method: "POST", body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const blob = await r.blob();
+    const v = $("previewVideo");
+    v.src = URL.createObjectURL(blob);
+    v.style.display = "block";
+    v.play();
+  } catch (e) {
+    alert("preview failed: " + e);
+  } finally {
+    $("previewBtn").disabled = false;
+    $("previewBtn").textContent = "Preview particle effect";
+  }
+});
+
+$("renderBtn").addEventListener("click", async () => {
+  if (!$("song").files[0] || !$("cover").files[0]) { alert("song + cover art required"); return; }
+  $("renderBtn").disabled = true;
+  $("downloadLink").style.display = "none";
+  $("progressWrap").style.display = "block";
+
+  const fd = new FormData();
+  fd.set("song", $("song").files[0]);
+  fd.set("cover", $("cover").files[0]);
+  if ($("lyrics").files[0]) fd.set("lyrics", $("lyrics").files[0]);
+  fd.set("out_name", $("outName").value || "My Song");
+  fd.set("font", $("font").value);
+  fd.set("fontsize", $("fontsize").value);
+  fd.set("align", $("align").value);
+  fd.set("margin_v", $("marginV").value);
+  fd.set("highlight_color", $("highlightColor").value);
+  fd.set("base_color", $("baseColor").value);
+  fd.set("caps", $("caps").checked);
+  fd.set("line_karaoke", $("lineKaraoke").checked);
+  commonParticleCameraFields(fd);
+
+  const r = await fetch("/api/jobs", { method: "POST", body: fd });
+  const { job_id } = await r.json();
+
+  const poll = setInterval(async () => {
+    const s = await (await fetch(`/api/jobs/${job_id}`)).json();
+    $("progressFill").style.width = s.percent + "%";
+    $("stageLabel").textContent = s.error ? ("error: " + s.error) : s.stage + " — " + s.percent + "%";
+    if (s.done) {
+      clearInterval(poll);
+      $("renderBtn").disabled = false;
+      if (s.ready) {
+        $("downloadLink").href = `/api/jobs/${job_id}/download`;
+        $("downloadLink").style.display = "inline-block";
+      }
+    }
+  }, 1500);
+});
+</script>
+</body>
+</html>
