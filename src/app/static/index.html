@@ -29,7 +29,15 @@
   #downloadLink { display: none; }
   .value { float: right; color: #7d8bff; }
   #livePreviewBox { max-width: 1200px; }
-  #livePreviewBox video { width: 100%; max-width: 480px; display: block; border-radius: 8px; background: #000; }
+  #previewStage { position: relative; width: 100%; max-width: 480px; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; }
+  #previewStage video { width: 100%; height: 100%; display: block; object-fit: cover; }
+  #guideOverlay { position: absolute; inset: 0; pointer-events: none; display: none; }
+  #guideOverlay .line { position: absolute; background: rgba(255,255,255,.35); }
+  #guideOverlay .line.v { top: 0; bottom: 0; width: 1px; }
+  #guideOverlay .line.h { left: 0; right: 0; height: 1px; }
+  #guideOverlay .edge { position: absolute; inset: 0; border: 2px solid rgba(255,255,255,.6); box-sizing: border-box; }
+  #guideOverlay .burstBox { position: absolute; border: 1px dashed rgba(255,120,60,.85); box-sizing: border-box; }
+  #guideOverlay .burstLabel { position: absolute; top: 2px; left: 2px; font-size: .65rem; color: rgba(255,150,90,.9); background: rgba(0,0,0,.4); padding: 1px 4px; border-radius: 3px; }
   #previewHint { color: #9a9aa5; font-size: .85rem; margin-top: .4rem; }
   #previewBtn.loading { opacity: .6; }
 </style>
@@ -40,9 +48,13 @@
 
   <fieldset id="livePreviewBox">
     <legend>Live preview (camera + particles + text, dummy image/text, updates as you tune settings)</legend>
-    <video id="previewVideo" autoplay loop muted playsinline style="display:none"></video>
+    <div id="previewStage">
+      <video id="previewVideo" autoplay loop muted playsinline style="display:none"></video>
+      <div id="guideOverlay"></div>
+    </div>
     <div id="previewHint">Pick a cover image below to start the live preview.</div>
     <button class="secondary" id="previewBtn">Refresh preview now</button>
+    <div class="checkline"><input type="checkbox" id="showGuides"><label for="showGuides">Show framing guides (screen edge, rule-of-thirds, burst scatter area)</label></div>
   </fieldset>
 
   <div class="grid">
@@ -180,6 +192,39 @@ fetch("/api/fonts").then(r => r.json()).then(d => {
   });
 });
 
+function renderGuideOverlay() {
+  const overlay = $("guideOverlay");
+  if (!$("showGuides").checked) { overlay.style.display = "none"; return; }
+  overlay.style.display = "block";
+  overlay.innerHTML = "";
+
+  const edge = document.createElement("div");
+  edge.className = "edge";
+  overlay.appendChild(edge);
+
+  [33.333, 66.666].forEach(pct => {
+    const v = document.createElement("div");
+    v.className = "line v"; v.style.left = pct + "%";
+    overlay.appendChild(v);
+    const h = document.createElement("div");
+    h.className = "line h"; h.style.top = pct + "%";
+    overlay.appendChild(h);
+  });
+
+  const [x0, x1, y0, y1] = burstAreaBounds();
+  const box = document.createElement("div");
+  box.className = "burstBox";
+  box.style.left = (x0 * 100) + "%";
+  box.style.top = (y0 * 100) + "%";
+  box.style.width = ((x1 - x0) * 100) + "%";
+  box.style.height = ((y1 - y0) * 100) + "%";
+  const label = document.createElement("div");
+  label.className = "burstLabel";
+  label.textContent = "burst area";
+  box.appendChild(label);
+  overlay.appendChild(box);
+}
+
 function burstAreaBounds() {
   if ($("burstArea").value === "full") return [0, 1, 0, 1];
   return [0.2, 0.8, 0.3, 0.75];
@@ -271,6 +316,10 @@ document.querySelectorAll(".live-setting").forEach(fs => {
   fs.addEventListener("input", schedulePreviewRefresh);
   fs.addEventListener("change", schedulePreviewRefresh);
 });
+
+$("showGuides").addEventListener("change", renderGuideOverlay);
+$("burstArea").addEventListener("change", renderGuideOverlay);
+renderGuideOverlay();
 
 $("renderBtn").addEventListener("click", async () => {
   if (!$("song").files[0] || !$("cover").files[0]) { alert("song + cover art required"); return; }
