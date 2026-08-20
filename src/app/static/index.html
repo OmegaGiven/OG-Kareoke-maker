@@ -72,6 +72,7 @@
     <button class="secondary" id="previewBtn">Refresh preview now</button>
     <button class="secondary" id="burstBtn">Trigger particle burst</button>
     <div class="checkline"><input type="checkbox" id="showGuides"><label for="showGuides">Show framing guides (screen edge, rule-of-thirds, burst scatter area)</label></div>
+    <div class="checkline"><input type="checkbox" id="showTextPreview" checked><label for="showTextPreview">Show karaoke text in preview</label></div>
   </fieldset>
 
   <div class="grid">
@@ -130,6 +131,14 @@
 
       <fieldset class="live-setting">
         <legend>Camera</legend>
+        <label>Camera style preview</label>
+        <select id="cameraPreset">
+          <option value="">Custom (sliders below)</option>
+          <option value="static">Static (no motion)</option>
+          <option value="cinematic">Slow cinematic zoom</option>
+          <option value="handheld">Shaky handheld</option>
+          <option value="boom">Heavy beat boom</option>
+        </select>
         <label>Zoom drift speed <span class="value" id="zoomSpeedVal">0.0006</span></label>
         <input type="range" id="zoomSpeed" min="0" max="0.003" step="0.0001" value="0.0006">
         <div class="row">
@@ -352,7 +361,8 @@ async function setupMinimap(jobId) {
   v.addEventListener("timeupdate", minimapTimeupdateHandler);
 }
 
-async function refreshPreview() {
+async function refreshPreview(opts) {
+  opts = opts || {};
   if (!$("cover").files[0]) {
     $("previewHint").textContent = "Pick a cover image below to start the live preview.";
     return;
@@ -360,7 +370,7 @@ async function refreshPreview() {
   if (previewInFlight) { previewDirtyWhileBusy = true; return; }
   previewInFlight = true;
   $("previewBtn").classList.add("loading");
-  $("previewHint").textContent = "Rendering preview...";
+  $("previewHint").textContent = opts.burstNow ? "Rendering burst..." : "Rendering preview...";
 
   const fd = new FormData();
   fd.set("cover", $("cover").files[0]);
@@ -374,6 +384,8 @@ async function refreshPreview() {
   fd.set("caps", $("caps").checked);
   fd.set("line_karaoke", $("lineKaraoke").checked);
   fd.set("lyrics_text", $("lyricsText").value);
+  fd.set("show_text", $("showTextPreview").checked);
+  fd.set("burst_now", !!opts.burstNow);
 
   try {
     const r = await fetch("/api/preview", { method: "POST", body: fd });
@@ -424,13 +436,32 @@ $("lyrics").addEventListener("change", () => {
   reader.readAsText($("lyrics").files[0]);
 });
 
-// Re-plays the loop from just before the first burst so the effect is
-// visible almost immediately instead of waiting out the loop naturally.
-$("burstBtn").addEventListener("click", () => {
-  const v = $("previewVideo");
-  if (!v.src) return;
-  v.currentTime = 0.1;
-  v.play();
+$("showTextPreview").addEventListener("change", () => refreshPreview());
+
+// Forces a fresh re-render with one guaranteed max-strength hit right at
+// the start (see burst_now on the backend) instead of just scrubbing the
+// already-loaded clip -- scrubbing to a regular hit was too easy to miss
+// and didn't reflect current particle settings if they'd just changed.
+$("burstBtn").addEventListener("click", () => refreshPreview({ burstNow: true }));
+
+const CAMERA_PRESETS = {
+  static:    { zoomSpeed: 0, swayX: 0, swayY: 0, swayFreqX: 40, swayFreqY: 55, boomAmplitude: 0, noBoom: true },
+  cinematic: { zoomSpeed: 0.0004, swayX: 8, swayY: 5, swayFreqX: 90, swayFreqY: 110, boomAmplitude: 0.03, noBoom: false },
+  handheld:  { zoomSpeed: 0.0006, swayX: 55, swayY: 35, swayFreqX: 18, swayFreqY: 24, boomAmplitude: 0.08, noBoom: false },
+  boom:      { zoomSpeed: 0.0006, swayX: 20, swayY: 12, swayFreqX: 40, swayFreqY: 55, boomAmplitude: 0.28, noBoom: false },
+};
+
+$("cameraPreset").addEventListener("change", () => {
+  const preset = CAMERA_PRESETS[$("cameraPreset").value];
+  if (!preset) return;
+  $("zoomSpeed").value = preset.zoomSpeed; $("zoomSpeedVal").textContent = preset.zoomSpeed;
+  $("swayX").value = preset.swayX;
+  $("swayY").value = preset.swayY;
+  $("swayFreqX").value = preset.swayFreqX;
+  $("swayFreqY").value = preset.swayFreqY;
+  $("boomAmplitude").value = preset.boomAmplitude; $("boomAmpVal").textContent = preset.boomAmplitude;
+  $("noBoom").checked = preset.noBoom;
+  schedulePreviewRefresh();
 });
 
 $("showGuides").addEventListener("change", renderGuideOverlay);

@@ -286,7 +286,9 @@ async def preview(
     boom_attack: float = Form(0.05),
     boom_decay: float = Form(0.22),
     no_boom: bool = Form(False),
+    burst_now: bool = Form(False),
     # text
+    show_text: bool = Form(True),
     font: str = Form("Black Ops One"),
     fontsize: int = Form(88),
     align: str = Form("bottom"),
@@ -313,10 +315,13 @@ async def preview(
 
     duration = 4.0
     # Evenly spaced fake "hits" so bursts + boom pulses are visibly exercised.
-    beats = {
-        "beat_times": [i * 0.5 for i in range(int(duration / 0.5))],
-        "hits": [{"time": t, "strength": 0.6 + 0.4 * (i % 2)} for i, t in enumerate([0.4, 1.2, 2.0, 2.8, 3.5])],
-    }
+    hits = [{"time": t, "strength": 0.6 + 0.4 * (i % 2)} for i, t in enumerate([0.4, 1.2, 2.0, 2.8, 3.5])]
+    if burst_now:
+        # "Trigger particle burst" -- force one unmissable max-strength hit
+        # right at the start instead of relying on the user to notice one
+        # of the regular spaced-out hits mid-loop.
+        hits = [{"time": 0.15, "strength": 1.0}] + hits
+    beats = {"beat_times": [i * 0.5 for i in range(int(duration / 0.5))], "hits": hits}
     beats_path = job_dir / "beats.json"
     with open(beats_path, "w") as f:
         json.dump(beats, f)
@@ -387,12 +392,15 @@ async def preview(
     ], check=True)
 
     out_path = job_dir / "preview.mp4"
-    subprocess.run([
-        "ffmpeg", "-y", "-i", str(visual_path),
-        "-filter_complex", f"[0:v]ass={ass_path}[outv]", "-map", "[outv]",
-        "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p",
-        str(out_path), "-loglevel", "error",
-    ], check=True)
+    if show_text:
+        subprocess.run([
+            "ffmpeg", "-y", "-i", str(visual_path),
+            "-filter_complex", f"[0:v]ass={ass_path}[outv]", "-map", "[outv]",
+            "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+            str(out_path), "-loglevel", "error",
+        ], check=True)
+    else:
+        visual_path.rename(out_path)
 
     shutil.rmtree(frames_dir, ignore_errors=True)
     return FileResponse(out_path, media_type="video/mp4", headers={"X-Preview-Job-Id": job_id})
