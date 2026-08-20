@@ -28,6 +28,7 @@ SONG="" COVER="" OUT="" LYRICS="" FONT="Black Ops One" FONTSIZE=88
 HIGHLIGHT="gold" BASE="white" SMOKE_FLAG="" NO_SMOKE_FLAG="" NO_PULSE_FLAG=""
 BURST_COUNT_MAX=28 BURST_SIZE_MAX=5.5 BURST_SPEED=270
 BURST_AREA_X0=0.2 BURST_AREA_X1=0.8 BURST_AREA_Y0=0.3 BURST_AREA_Y1=0.75
+PARTICLE_COLOR="255,150,40"
 ZOOM_SPEED=0.0006 SWAY_X=40 SWAY_Y=25 SWAY_FREQ_X=40 SWAY_FREQ_Y=55
 ONSET_DELTA=0.12
 BOOM_AMPLITUDE=0.10 BOOM_ATTACK=0.05 BOOM_DECAY=0.22 BOOM_MIN_STRENGTH=0.0 NO_BOOM_FLAG=""
@@ -63,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --line-karaoke) LINE_KARAOKE_FLAG="--line-karaoke"; shift ;;
     --buffer) BUFFER="$2"; shift 2 ;;
     --min-display) MIN_DISPLAY="$2"; shift 2 ;;
+    --particle-color) PARTICLE_COLOR="$2"; shift 2 ;;
     --output-path) OUTPUT_PATH="$2"; shift 2 ;;
     --zoom-speed) ZOOM_SPEED="$2"; shift 2 ;;
     --sway-x) SWAY_X="$2"; shift 2 ;;
@@ -128,6 +130,7 @@ python3 "$TOOLS/scene_compositor.py" "$COVER" "$SCRATCH/beats.json" "$DURATION" 
   --burst-count-max "$BURST_COUNT_MAX" --burst-size-max "$BURST_SIZE_MAX" --burst-speed "$BURST_SPEED" \
   --burst-area-x0 "$BURST_AREA_X0" --burst-area-x1 "$BURST_AREA_X1" \
   --burst-area-y0 "$BURST_AREA_Y0" --burst-area-y1 "$BURST_AREA_Y1" \
+  --color "$PARTICLE_COLOR" \
   --jobs "$JOBS"
 echo "STAGE: encode"
 ffmpeg -y -framerate 24 -i "$SCRATCH/frames/frame_%06d.png" -c:v libx264 -crf 18 -preset medium -pix_fmt yuv420p "$SCRATCH/visual.mp4" -loglevel error

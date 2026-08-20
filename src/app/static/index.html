@@ -40,6 +40,13 @@
   #guideOverlay .burstLabel { position: absolute; top: 2px; left: 2px; font-size: .65rem; color: rgba(255,150,90,.9); background: rgba(0,0,0,.4); padding: 1px 4px; border-radius: 3px; }
   #previewHint { color: #9a9aa5; font-size: .85rem; margin-top: .4rem; }
   #previewBtn.loading { opacity: .6; }
+  #previewStage { flex: 1 1 320px; }
+  #minimapStage { flex: 1 1 180px; max-width: 220px; }
+  #minimapBox { position: relative; width: 100%; aspect-ratio: 16/9; background: #000; border-radius: 6px; overflow: hidden; }
+  #minimapBox img { width: 100%; height: 100%; object-fit: cover; display: block; opacity: .85; }
+  #minimapRect { position: absolute; border: 2px solid #7d8bff; background: rgba(125,139,255,.12); box-sizing: border-box; }
+  select.color-preset { width: auto; display: inline-block; margin-right: .4rem; }
+  input[type=color] { width: 44px; height: 30px; padding: 2px; vertical-align: middle; cursor: pointer; }
 </style>
 </head>
 <body>
@@ -48,12 +55,22 @@
 
   <fieldset id="livePreviewBox">
     <legend>Live preview (camera + particles + text, dummy image/text, updates as you tune settings)</legend>
-    <div id="previewStage">
-      <video id="previewVideo" autoplay loop muted playsinline style="display:none"></video>
-      <div id="guideOverlay"></div>
+    <div class="row">
+      <div id="previewStage">
+        <video id="previewVideo" autoplay loop muted playsinline style="display:none"></video>
+        <div id="guideOverlay"></div>
+      </div>
+      <div id="minimapStage" style="display:none">
+        <div class="value" style="float:none;font-size:.75rem;color:#9a9aa5;margin-bottom:.3rem">Camera crop window (moves with zoom/sway/boom)</div>
+        <div id="minimapBox">
+          <img id="minimapImg">
+          <div id="minimapRect"></div>
+        </div>
+      </div>
     </div>
     <div id="previewHint">Pick a cover image below to start the live preview.</div>
     <button class="secondary" id="previewBtn">Refresh preview now</button>
+    <button class="secondary" id="burstBtn">Trigger particle burst</button>
     <div class="checkline"><input type="checkbox" id="showGuides"><label for="showGuides">Show framing guides (screen edge, rule-of-thirds, burst scatter area)</label></div>
   </fieldset>
 
@@ -65,8 +82,9 @@
         <input type="file" id="song" accept="audio/*,video/*">
         <label>Cover art</label>
         <input type="file" id="cover" accept="image/*">
-        <label>Lyrics (.txt, one line per cue) — omit to auto-detect from vocals</label>
-        <input type="file" id="lyrics" accept=".txt">
+        <label>Lyrics — paste text, or drop a .txt file below (one line per cue; bracketed text like [chorus] is ignored automatically). Leave both empty to auto-detect from vocals.</label>
+        <textarea id="lyricsText" rows="4" style="width:100%;box-sizing:border-box;background:#1e1f26;border:1px solid #33343c;color:#e8e8ec;border-radius:5px;padding:.4rem;margin-top:.2rem;font-family:inherit;" placeholder="[verse]&#10;Call it in, watch it fall..."></textarea>
+        <input type="file" id="lyrics" accept=".txt" style="margin-top:.4rem">
         <label>Output name</label>
         <input type="text" id="outName" value="My Song">
       </fieldset>
@@ -94,11 +112,13 @@
         <div class="row">
           <div>
             <label>Highlight color</label>
-            <input type="text" id="highlightColor" value="gold">
+            <select id="highlightPreset" class="color-preset"></select>
+            <input type="color" id="highlightColor" value="#FFD700">
           </div>
           <div>
             <label>Base color</label>
-            <input type="text" id="baseColor" value="white">
+            <select id="basePreset" class="color-preset"></select>
+            <input type="color" id="baseColor" value="#FFFFFF">
           </div>
         </div>
         <div class="checkline"><input type="checkbox" id="caps" checked><label for="caps">ALL CAPS</label></div>
@@ -149,6 +169,9 @@
         <input type="range" id="burstCountMax" min="4" max="150" value="28">
         <label>Burst speed <span class="value" id="burstSpeedVal">270</span></label>
         <input type="range" id="burstSpeed" min="50" max="700" value="270">
+        <label>Particle color</label>
+        <select id="particlePreset" class="color-preset"></select>
+        <input type="color" id="particleColor" value="#FF9628">
         <label>Burst scatter area</label>
         <select id="burstArea">
           <option value="center">Center-weighted (classic)</option>
@@ -181,6 +204,44 @@ const $ = id => document.getElementById(id);
   const el = $(inId), out = $(outId);
   el.addEventListener("input", () => out.textContent = el.value);
 });
+
+const WEB_COLORS = {
+  White: "#FFFFFF", Black: "#000000", Gold: "#FFD700", Yellow: "#FFFF00",
+  Red: "#FF3B30", Orange: "#FF8C00", Cyan: "#00E5FF", Green: "#39FF14",
+  Blue: "#3B82F6", Pink: "#FF3D9A", Purple: "#B026FF",
+};
+
+document.querySelectorAll("select.color-preset").forEach(sel => {
+  const custom = document.createElement("option");
+  custom.value = ""; custom.textContent = "Custom …";
+  sel.appendChild(custom);
+  Object.entries(WEB_COLORS).forEach(([name, hex]) => {
+    const o = document.createElement("option");
+    o.value = hex; o.textContent = name;
+    sel.appendChild(o);
+  });
+});
+
+function wireColorPreset(presetId, colorId) {
+  const preset = $(presetId), color = $(colorId);
+  preset.addEventListener("change", () => {
+    if (preset.value) { color.value = preset.value; color.dispatchEvent(new Event("input")); }
+  });
+  color.addEventListener("input", () => {
+    const match = Object.entries(WEB_COLORS).find(([, hex]) => hex.toLowerCase() === color.value.toLowerCase());
+    preset.value = match ? match[1] : "";
+  });
+  preset.value = color.value.toUpperCase();
+}
+wireColorPreset("highlightPreset", "highlightColor");
+wireColorPreset("basePreset", "baseColor");
+wireColorPreset("particlePreset", "particleColor");
+
+function hexToRgbCsv(hex) {
+  hex = hex.replace("#", "");
+  const n = parseInt(hex, 16);
+  return `${(n >> 16) & 255},${(n >> 8) & 255},${n & 255}`;
+}
 
 fetch("/api/fonts").then(r => r.json()).then(d => {
   const sel = $("font");
@@ -248,12 +309,48 @@ function commonParticleCameraFields(fd) {
   fd.set("sway_freq_y", $("swayFreqY").value);
   fd.set("boom_amplitude", $("boomAmplitude").value);
   fd.set("no_boom", $("noBoom").checked);
+  fd.set("particle_color", hexToRgbCsv($("particleColor").value));
 }
 
 let previewInFlight = false;
 let previewDirtyWhileBusy = false;
 let previewDebounceTimer = null;
 let previewObjectUrl = null;
+let minimapObjectUrl = null;
+let cameraSamples = [];
+let minimapTimeupdateHandler = null;
+
+async function setupMinimap(jobId) {
+  const v = $("previewVideo"), stage = $("minimapStage"), img = $("minimapImg");
+  cameraSamples = [];
+  try {
+    const r = await fetch(`/api/preview/${jobId}/camera-path`);
+    if (r.ok) cameraSamples = await r.json();
+  } catch (e) { /* minimap is a nice-to-have, ignore fetch failures */ }
+
+  if (!cameraSamples.length) { stage.style.display = "none"; return; }
+
+  const oldUrl = minimapObjectUrl;
+  minimapObjectUrl = URL.createObjectURL($("cover").files[0]);
+  img.src = minimapObjectUrl;
+  if (oldUrl) URL.revokeObjectURL(oldUrl);
+  stage.style.display = "block";
+
+  if (minimapTimeupdateHandler) v.removeEventListener("timeupdate", minimapTimeupdateHandler);
+  minimapTimeupdateHandler = () => {
+    const t = v.currentTime;
+    // cameraSamples is one entry per rendered frame (~24/s) in ascending
+    // t order -- a linear scan from the end is plenty fast for a 4s clip.
+    let s = cameraSamples[0];
+    for (const cand of cameraSamples) { if (cand.t <= t) s = cand; else break; }
+    const rect = $("minimapRect");
+    rect.style.left = (s.x0 * 100) + "%";
+    rect.style.top = (s.y0 * 100) + "%";
+    rect.style.width = ((s.x1 - s.x0) * 100) + "%";
+    rect.style.height = ((s.y1 - s.y0) * 100) + "%";
+  };
+  v.addEventListener("timeupdate", minimapTimeupdateHandler);
+}
 
 async function refreshPreview() {
   if (!$("cover").files[0]) {
@@ -276,10 +373,12 @@ async function refreshPreview() {
   fd.set("base_color", $("baseColor").value);
   fd.set("caps", $("caps").checked);
   fd.set("line_karaoke", $("lineKaraoke").checked);
+  fd.set("lyrics_text", $("lyricsText").value);
 
   try {
     const r = await fetch("/api/preview", { method: "POST", body: fd });
     if (!r.ok) throw new Error(await r.text());
+    const jobId = r.headers.get("X-Preview-Job-Id");
     const blob = await r.blob();
     const v = $("previewVideo");
     const oldUrl = previewObjectUrl;
@@ -289,6 +388,7 @@ async function refreshPreview() {
     v.play();
     if (oldUrl) URL.revokeObjectURL(oldUrl);
     $("previewHint").textContent = "Looping preview at current settings.";
+    setupMinimap(jobId);
   } catch (e) {
     $("previewHint").textContent = "preview failed: " + e;
   } finally {
@@ -316,6 +416,22 @@ document.querySelectorAll(".live-setting").forEach(fs => {
   fs.addEventListener("input", schedulePreviewRefresh);
   fs.addEventListener("change", schedulePreviewRefresh);
 });
+$("lyricsText").addEventListener("input", schedulePreviewRefresh);
+$("lyrics").addEventListener("change", () => {
+  if (!$("lyrics").files[0]) return;
+  const reader = new FileReader();
+  reader.onload = () => { $("lyricsText").value = reader.result; schedulePreviewRefresh(); };
+  reader.readAsText($("lyrics").files[0]);
+});
+
+// Re-plays the loop from just before the first burst so the effect is
+// visible almost immediately instead of waiting out the loop naturally.
+$("burstBtn").addEventListener("click", () => {
+  const v = $("previewVideo");
+  if (!v.src) return;
+  v.currentTime = 0.1;
+  v.play();
+});
 
 $("showGuides").addEventListener("change", renderGuideOverlay);
 $("burstArea").addEventListener("change", renderGuideOverlay);
@@ -330,7 +446,7 @@ $("renderBtn").addEventListener("click", async () => {
   const fd = new FormData();
   fd.set("song", $("song").files[0]);
   fd.set("cover", $("cover").files[0]);
-  if ($("lyrics").files[0]) fd.set("lyrics", $("lyrics").files[0]);
+  fd.set("lyrics_text", $("lyricsText").value);
   fd.set("out_name", $("outName").value || "My Song");
   fd.set("font", $("font").value);
   fd.set("fontsize", $("fontsize").value);

@@ -42,6 +42,18 @@ JOBS_LOCK = threading.Lock()
 
 FRAME_TOTAL_RE = re.compile(r"rendering (\d+) frames")
 FRAME_PROGRESS_RE = re.compile(r"^\s*(\d+)/(\d+)\s*$")
+BRACKETED_RE = re.compile(r"\[[^\]]*\]")
+
+
+def clean_lyrics_text(text):
+    """Strip bracketed stage directions ([chorus], [verse 2], ad-libs, etc.)
+    line by line, dropping any line left empty after stripping."""
+    lines = []
+    for raw in text.splitlines():
+        line = BRACKETED_RE.sub("", raw).strip()
+        if line:
+            lines.append(line)
+    return lines
 
 STAGE_WEIGHTS = {
     "extract_audio": 2,
@@ -106,6 +118,7 @@ async def create_job(
     song: UploadFile = File(...),
     cover: UploadFile = File(...),
     lyrics: UploadFile = File(None),
+    lyrics_text: str = Form(""),
     out_name: str = Form("My Song"),
     font: str = Form("Black Ops One"),
     fontsize: int = Form(88),
@@ -140,6 +153,7 @@ async def create_job(
     boom_min_strength: float = Form(0.0),
     no_boom: bool = Form(False),
     jobs: int = Form(0),
+    particle_color: str = Form("255,150,40"),
 ):
     job_id = uuid.uuid4().hex[:12]
     job_dir = JOBS_DIR / job_id
@@ -152,11 +166,22 @@ async def create_job(
     with open(cover_path, "wb") as f:
         shutil.copyfileobj(cover.file, f)
 
+    # Text box takes priority over an uploaded file if both are given;
+    # bracketed stage directions ([chorus], [verse 2], ad-libs, ...) are
+    # stripped either way -- karaoke_ass.py should only ever see sung lines.
+    raw_lyrics = None
+    if lyrics_text.strip():
+        raw_lyrics = lyrics_text
+    elif lyrics is not None and lyrics.filename:
+        raw_lyrics = (await lyrics.read()).decode("utf-8", errors="replace")
+
     lyrics_path = None
-    if lyrics is not None and lyrics.filename:
-        lyrics_path = job_dir / "lyrics.txt"
-        with open(lyrics_path, "wb") as f:
-            shutil.copyfileobj(lyrics.file, f)
+    if raw_lyrics is not None:
+        cleaned = clean_lyrics_text(raw_lyrics)
+        if cleaned:
+            lyrics_path = job_dir / "lyrics.txt"
+            with open(lyrics_path, "w") as f:
+                f.write("\n".join(cleaned) + "\n")
 
     output_path = job_dir / f"{out_name} - Lyric Video.mp4"
 
@@ -179,6 +204,7 @@ async def create_job(
         "--boom-amplitude", str(boom_amplitude), "--boom-attack", str(boom_attack),
         "--boom-decay", str(boom_decay), "--boom-min-strength", str(boom_min_strength),
         "--jobs", str(jobs),
+        "--particle-color", particle_color,
     ]
     if lyrics_path:
         cmd += ["--lyrics", str(lyrics_path)]
@@ -249,6 +275,7 @@ async def preview(
     burst_area_y1: float = Form(0.75),
     smoke_only: bool = Form(False),
     no_smoke: bool = Form(False),
+    particle_color: str = Form("255,150,40"),
     # camera
     zoom_speed: float = Form(0.0006),
     sway_x: float = Form(40),
@@ -268,12 +295,15 @@ async def preview(
     base_color: str = Form("white"),
     caps: bool = Form(True),
     line_karaoke: bool = Form(False),
+    lyrics_text: str = Form(""),
 ):
-    """Renders a short (4s), looping synthetic clip with dummy placeholder
-    text so the UI can show camera motion + particles + karaoke text style
-    together, at current settings, without waiting on a full song render.
-    Runs the exact same scene_compositor.py / karaoke_ass.py code paths as
-    a real render -- this is WYSIWYG, not a separate mock renderer."""
+    """Renders a short (4s), looping synthetic clip so the UI can show
+    camera motion + particles + karaoke text style together, at current
+    settings, without waiting on a full song render. Runs the exact same
+    scene_compositor.py / karaoke_ass.py code paths as a real render --
+    this is WYSIWYG, not a separate mock renderer. Shows the user's actual
+    (bracket-stripped) lyrics if any have been entered yet, else a generic
+    placeholder line so text styling is still visible before lyrics exist."""
     job_id = "preview-" + uuid.uuid4().hex[:8]
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True)
@@ -291,19 +321,25 @@ async def preview(
     with open(beats_path, "w") as f:
         json.dump(beats, f)
 
-    # Dummy word timings spaced evenly across the clip, spelled identically
-    # to PREVIEW_DUMMY_LINES so karaoke_ass.py's alignment matches every
-    # word exactly -- no interpolation guesswork needed for a preview.
+    cleaned = clean_lyrics_text(lyrics_text) if lyrics_text.strip() else []
+    preview_lines = cleaned[:2] if cleaned else PREVIEW_DUMMY_LINES
+    preview_words = [w for line in preview_lines for w in line.split()][:10] or PREVIEW_DUMMY_WORDS
+
+    # Word timings spaced evenly across the clip, spelled identically to
+    # preview_lines so karaoke_ass.py's alignment matches every word exactly
+    # -- no interpolation guesswork needed for a preview.
+    span = duration - 0.6
+    step = span / max(len(preview_words), 1)
     words_json = []
-    for i, w in enumerate(PREVIEW_DUMMY_WORDS):
-        start = 0.3 + i * 0.5
-        words_json.append({"word": w, "start": start, "end": start + 0.35})
+    for i, w in enumerate(preview_words):
+        start = 0.3 + i * step
+        words_json.append({"word": w, "start": start, "end": start + min(step * 0.7, 0.35)})
     words_path = job_dir / "words.json"
     with open(words_path, "w") as f:
         json.dump(words_json, f)
     lyrics_path = job_dir / "lyrics.txt"
     with open(lyrics_path, "w") as f:
-        f.write("\n".join(PREVIEW_DUMMY_LINES) + "\n")
+        f.write("\n".join(preview_lines) + "\n")
 
     ass_path = job_dir / "lyrics.ass"
     ass_cmd = [
@@ -319,6 +355,7 @@ async def preview(
     subprocess.run(ass_cmd, check=True, cwd=str(TOOLS_DIR))
 
     frames_dir = job_dir / "frames"
+    camera_json_path = job_dir / "camera.json"
     scene_cmd = [
         "python3", str(TOOLS_DIR / "scene_compositor.py"),
         str(cover_path), str(beats_path), str(duration), str(frames_dir),
@@ -327,10 +364,12 @@ async def preview(
         "--burst-speed", str(burst_speed),
         "--burst-area-x0", str(burst_area_x0), "--burst-area-x1", str(burst_area_x1),
         "--burst-area-y0", str(burst_area_y0), "--burst-area-y1", str(burst_area_y1),
+        "--color", particle_color,
         "--zoom-drift", str(zoom_speed), "--sway-x", str(sway_x), "--sway-y", str(sway_y),
         "--sway-freq-x", str(sway_freq_x), "--sway-freq-y", str(sway_freq_y),
         "--boom-amplitude", str(boom_amplitude), "--boom-attack", str(boom_attack),
         "--boom-decay", str(boom_decay),
+        "--camera-json", str(camera_json_path),
     ]
     if smoke_only:
         scene_cmd.append("--smoke-only")
@@ -356,7 +395,18 @@ async def preview(
     ], check=True)
 
     shutil.rmtree(frames_dir, ignore_errors=True)
-    return FileResponse(out_path, media_type="video/mp4")
+    return FileResponse(out_path, media_type="video/mp4", headers={"X-Preview-Job-Id": job_id})
+
+
+@app.get("/api/preview/{job_id}/camera-path")
+def preview_camera_path(job_id: str):
+    """Per-frame crop-window rects (fraction of the full cover image) for
+    the given preview job, so the UI can show a moving camera-crop minimap
+    synced to video playback instead of a static frame guide."""
+    path = JOBS_DIR / job_id / "camera.json"
+    if not path.exists():
+        return JSONResponse({"error": "unknown preview job"}, status_code=404)
+    return FileResponse(path, media_type="application/json")
 
 
 @app.get("/api/fonts")

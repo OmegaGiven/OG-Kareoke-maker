@@ -215,6 +215,8 @@ def main():
     ap.add_argument("--color", default="255,150,40")
     ap.add_argument("--seed", type=int, default=17)
     ap.add_argument("--jobs", type=int, default=0, help="Worker processes (default: 0 = all CPU cores)")
+    ap.add_argument("--camera-json", help="Optional: dump per-frame crop-window rects (fraction of the full cover "
+                     "image) to this path, e.g. for a UI to show the moving camera crop against the full art")
     args = ap.parse_args()
 
     with open(args.beats_json) as f:
@@ -283,6 +285,33 @@ def main():
         "burst_times": [b["time"] for b in bursts],
         "spark_color": spark_color, "out_dir": args.out_dir,
     })
+
+    if args.camera_json:
+        # Camera transform math only (no pixel work), so this is cheap to
+        # run single-threaded even for a full song -- lets a UI show the
+        # moving crop window against the full cover art without decoding
+        # rendered frames itself.
+        samples = []
+        for f in range(frames):
+            t = f / FPS
+            drift = min(args.zoom_drift * f, args.zoom_drift_max)
+            boom = boom_zoom_extra(t)  # reads G["args"]/G["hits"], already populated above
+            zoom = 1.0 + drift + boom
+            crop_w = min(big_w, W / zoom)
+            crop_h = min(big_h, H / zoom)
+            sway_x = args.sway_x * math.sin(f / args.sway_freq_x)
+            sway_y = args.sway_y * math.cos(f / args.sway_freq_y)
+            cx = big_w / 2 + sway_x - crop_w / 2
+            cy = big_h / 2 + sway_y - crop_h / 2
+            cx = max(0, min(big_w - crop_w, cx))
+            cy = max(0, min(big_h - crop_h, cy))
+            samples.append({
+                "t": round(t, 3),
+                "x0": round(cx / big_w, 4), "x1": round((cx + crop_w) / big_w, 4),
+                "y0": round(cy / big_h, 4), "y1": round((cy + crop_h) / big_h, 4),
+            })
+        with open(args.camera_json, "w") as f:
+            json.dump(samples, f)
 
     n_jobs = args.jobs if args.jobs > 0 else os.cpu_count()
     print(f"rendering {frames} frames across {n_jobs} worker processes...")
