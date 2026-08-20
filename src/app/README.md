@@ -10,7 +10,22 @@ This is an orchestration layer only — it shells out to
 `render_lyric_video.sh` and `scene_compositor.py`, it doesn't reimplement
 any rendering logic.
 
-## Run
+## Deployed instance
+
+Runs persistently on `station` as a `systemctl --user` service
+(`~/.config/systemd/user/og-karaoke-maker.service`), port 8094, using the
+`~/ai-companion/whisper-env` venv (already has faster-whisper/librosa for
+transcription; fastapi/uvicorn/pillow were added to it so one venv covers
+the whole pipeline — see that service file's `Environment=` lines for the
+cuBLAS `LD_LIBRARY_PATH` workaround and `TRANSCRIBE_LOCAL=1`). Listed on
+go's Homepage dashboard under AI as "OG Karaoke Maker".
+
+```bash
+ssh station systemctl --user status og-karaoke-maker
+ssh station journalctl --user -u og-karaoke-maker -f
+```
+
+## Run (manual / dev)
 
 ```bash
 pip install -r requirements.txt
