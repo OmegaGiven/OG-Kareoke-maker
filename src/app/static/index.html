@@ -28,11 +28,22 @@
   video { width: 100%; border-radius: 8px; margin-top: .6rem; background: #000; }
   #downloadLink { display: none; }
   .value { float: right; color: #7d8bff; }
+  #livePreviewBox { max-width: 1200px; }
+  #livePreviewBox video { width: 100%; max-width: 480px; display: block; border-radius: 8px; background: #000; }
+  #previewHint { color: #9a9aa5; font-size: .85rem; margin-top: .4rem; }
+  #previewBtn.loading { opacity: .6; }
 </style>
 </head>
 <body>
   <h1>OG Karaoke Maker</h1>
   <div class="sub">Font, particles, camera, position — tune it, preview it, render it.</div>
+
+  <fieldset id="livePreviewBox">
+    <legend>Live preview (camera + particles + text, dummy image/text, updates as you tune settings)</legend>
+    <video id="previewVideo" autoplay loop muted playsinline style="display:none"></video>
+    <div id="previewHint">Pick a cover image below to start the live preview.</div>
+    <button class="secondary" id="previewBtn">Refresh preview now</button>
+  </fieldset>
 
   <div class="grid">
     <div>
@@ -48,7 +59,7 @@
         <input type="text" id="outName" value="My Song">
       </fieldset>
 
-      <fieldset>
+      <fieldset class="live-setting">
         <legend>Text</legend>
         <div class="row">
           <div>
@@ -85,7 +96,7 @@
         </div>
       </fieldset>
 
-      <fieldset>
+      <fieldset class="live-setting">
         <legend>Camera</legend>
         <label>Zoom drift speed <span class="value" id="zoomSpeedVal">0.0006</span></label>
         <input type="range" id="zoomSpeed" min="0" max="0.003" step="0.0001" value="0.0006">
@@ -116,7 +127,7 @@
     </div>
 
     <div>
-      <fieldset>
+      <fieldset class="live-setting">
         <legend>Particle effects</legend>
         <label>Ambient particle count <span class="value" id="ambientVal">70</span></label>
         <input type="range" id="ambientCount" min="0" max="200" value="70">
@@ -134,8 +145,6 @@
         <div class="checkline"><input type="checkbox" id="smokeOnly"><label for="smokeOnly">Smoke only (no sparks)</label></div>
         <div class="checkline"><input type="checkbox" id="noSmoke"><label for="noSmoke">No smoke layer</label></div>
         <div class="checkline"><input type="checkbox" id="noBeatPulse"><label for="noBeatPulse">No ambient beat pulse</label></div>
-        <button class="secondary" id="previewBtn">Preview particle effect</button>
-        <video id="previewVideo" controls loop style="display:none"></video>
       </fieldset>
 
       <fieldset>
@@ -196,27 +205,71 @@ function commonParticleCameraFields(fd) {
   fd.set("no_boom", $("noBoom").checked);
 }
 
-$("previewBtn").addEventListener("click", async () => {
-  if (!$("cover").files[0]) { alert("pick a cover image first"); return; }
-  $("previewBtn").disabled = true;
-  $("previewBtn").textContent = "Rendering preview...";
+let previewInFlight = false;
+let previewDirtyWhileBusy = false;
+let previewDebounceTimer = null;
+let previewObjectUrl = null;
+
+async function refreshPreview() {
+  if (!$("cover").files[0]) {
+    $("previewHint").textContent = "Pick a cover image below to start the live preview.";
+    return;
+  }
+  if (previewInFlight) { previewDirtyWhileBusy = true; return; }
+  previewInFlight = true;
+  $("previewBtn").classList.add("loading");
+  $("previewHint").textContent = "Rendering preview...";
+
   const fd = new FormData();
   fd.set("cover", $("cover").files[0]);
   commonParticleCameraFields(fd);
+  fd.set("font", $("font").value);
+  fd.set("fontsize", $("fontsize").value);
+  fd.set("align", $("align").value);
+  fd.set("margin_v", $("marginV").value);
+  fd.set("highlight_color", $("highlightColor").value);
+  fd.set("base_color", $("baseColor").value);
+  fd.set("caps", $("caps").checked);
+  fd.set("line_karaoke", $("lineKaraoke").checked);
+
   try {
-    const r = await fetch("/api/preview/particles", { method: "POST", body: fd });
+    const r = await fetch("/api/preview", { method: "POST", body: fd });
     if (!r.ok) throw new Error(await r.text());
     const blob = await r.blob();
     const v = $("previewVideo");
-    v.src = URL.createObjectURL(blob);
+    const oldUrl = previewObjectUrl;
+    previewObjectUrl = URL.createObjectURL(blob);
+    v.src = previewObjectUrl;
     v.style.display = "block";
     v.play();
+    if (oldUrl) URL.revokeObjectURL(oldUrl);
+    $("previewHint").textContent = "Looping preview at current settings.";
   } catch (e) {
-    alert("preview failed: " + e);
+    $("previewHint").textContent = "preview failed: " + e;
   } finally {
-    $("previewBtn").disabled = false;
-    $("previewBtn").textContent = "Preview particle effect";
+    previewInFlight = false;
+    $("previewBtn").classList.remove("loading");
+    if (previewDirtyWhileBusy) {
+      previewDirtyWhileBusy = false;
+      refreshPreview();
+    }
   }
+}
+
+function schedulePreviewRefresh() {
+  clearTimeout(previewDebounceTimer);
+  previewDebounceTimer = setTimeout(refreshPreview, 600);
+}
+
+$("previewBtn").addEventListener("click", refreshPreview);
+$("cover").addEventListener("change", refreshPreview);
+// Any tweak within a .live-setting fieldset (Text/Camera/Particle) re-renders
+// the live preview after a short debounce, so it keeps reflecting current
+// settings without needing a manual click each time. Delegated so it covers
+// every input inside those fieldsets without per-field listeners.
+document.querySelectorAll(".live-setting").forEach(fs => {
+  fs.addEventListener("input", schedulePreviewRefresh);
+  fs.addEventListener("change", schedulePreviewRefresh);
 });
 
 $("renderBtn").addEventListener("click", async () => {

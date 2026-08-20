@@ -7,3 +7,4 @@ src/app/data/
 *.wav
 *.png
 !src/app/static/*.png
+uvicorn.log

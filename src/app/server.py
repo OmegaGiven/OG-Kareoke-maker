@@ -231,9 +231,14 @@ def job_download(job_id: str):
     return FileResponse(job["output_path"], filename=Path(job["output_path"]).name)
 
 
-@app.post("/api/preview/particles")
-async def preview_particles(
+PREVIEW_DUMMY_LINES = ["YOUR LYRICS HERE", "PREVIEW LOOKS LIKE THIS"]
+PREVIEW_DUMMY_WORDS = [w for line in PREVIEW_DUMMY_LINES for w in line.split()]
+
+
+@app.post("/api/preview")
+async def preview(
     cover: UploadFile = File(...),
+    # particles
     ambient_count: int = Form(70),
     burst_count_max: int = Form(28),
     burst_size_max: float = Form(5.5),
@@ -244,6 +249,7 @@ async def preview_particles(
     burst_area_y1: float = Form(0.75),
     smoke_only: bool = Form(False),
     no_smoke: bool = Form(False),
+    # camera
     zoom_speed: float = Form(0.0006),
     sway_x: float = Form(40),
     sway_y: float = Form(25),
@@ -253,9 +259,21 @@ async def preview_particles(
     boom_attack: float = Form(0.05),
     boom_decay: float = Form(0.22),
     no_boom: bool = Form(False),
+    # text
+    font: str = Form("Black Ops One"),
+    fontsize: int = Form(88),
+    align: str = Form("bottom"),
+    margin_v: int = Form(130),
+    highlight_color: str = Form("gold"),
+    base_color: str = Form("white"),
+    caps: bool = Form(True),
+    line_karaoke: bool = Form(False),
 ):
-    """Renders a short (4s) synthetic clip so the UI can show the particle/
-    camera settings in action without waiting on a full song render."""
+    """Renders a short (4s), looping synthetic clip with dummy placeholder
+    text so the UI can show camera motion + particles + karaoke text style
+    together, at current settings, without waiting on a full song render.
+    Runs the exact same scene_compositor.py / karaoke_ass.py code paths as
+    a real render -- this is WYSIWYG, not a separate mock renderer."""
     job_id = "preview-" + uuid.uuid4().hex[:8]
     job_dir = JOBS_DIR / job_id
     job_dir.mkdir(parents=True)
@@ -273,8 +291,35 @@ async def preview_particles(
     with open(beats_path, "w") as f:
         json.dump(beats, f)
 
+    # Dummy word timings spaced evenly across the clip, spelled identically
+    # to PREVIEW_DUMMY_LINES so karaoke_ass.py's alignment matches every
+    # word exactly -- no interpolation guesswork needed for a preview.
+    words_json = []
+    for i, w in enumerate(PREVIEW_DUMMY_WORDS):
+        start = 0.3 + i * 0.5
+        words_json.append({"word": w, "start": start, "end": start + 0.35})
+    words_path = job_dir / "words.json"
+    with open(words_path, "w") as f:
+        json.dump(words_json, f)
+    lyrics_path = job_dir / "lyrics.txt"
+    with open(lyrics_path, "w") as f:
+        f.write("\n".join(PREVIEW_DUMMY_LINES) + "\n")
+
+    ass_path = job_dir / "lyrics.ass"
+    ass_cmd = [
+        "python3", str(TOOLS_DIR / "karaoke_ass.py"), str(words_path), str(duration), str(ass_path),
+        "--lyrics", str(lyrics_path), "--font", font, "--fontsize", str(fontsize),
+        "--align", align, "--margin-v", str(margin_v),
+        "--highlight-color", highlight_color, "--base-color", base_color,
+    ]
+    if caps:
+        ass_cmd.append("--caps")
+    if line_karaoke:
+        ass_cmd.append("--line-karaoke")
+    subprocess.run(ass_cmd, check=True, cwd=str(TOOLS_DIR))
+
     frames_dir = job_dir / "frames"
-    cmd = [
+    scene_cmd = [
         "python3", str(TOOLS_DIR / "scene_compositor.py"),
         str(cover_path), str(beats_path), str(duration), str(frames_dir),
         "--ambient-count", str(ambient_count),
@@ -288,19 +333,28 @@ async def preview_particles(
         "--boom-decay", str(boom_decay),
     ]
     if smoke_only:
-        cmd.append("--smoke-only")
+        scene_cmd.append("--smoke-only")
     if no_smoke:
-        cmd.append("--no-smoke")
+        scene_cmd.append("--no-smoke")
     if no_boom:
-        cmd.append("--no-boom")
+        scene_cmd.append("--no-boom")
+    subprocess.run(scene_cmd, check=True, cwd=str(TOOLS_DIR))
 
-    subprocess.run(cmd, check=True, cwd=str(TOOLS_DIR))
-    out_path = job_dir / "preview.mp4"
+    visual_path = job_dir / "visual.mp4"
     subprocess.run([
         "ffmpeg", "-y", "-framerate", "24", "-i", str(frames_dir / "frame_%06d.png"),
         "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p",
+        str(visual_path), "-loglevel", "error",
+    ], check=True)
+
+    out_path = job_dir / "preview.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-i", str(visual_path),
+        "-filter_complex", f"[0:v]ass={ass_path}[outv]", "-map", "[outv]",
+        "-c:v", "libx264", "-crf", "20", "-preset", "veryfast", "-pix_fmt", "yuv420p",
         str(out_path), "-loglevel", "error",
     ], check=True)
+
     shutil.rmtree(frames_dir, ignore_errors=True)
     return FileResponse(out_path, media_type="video/mp4")
 
